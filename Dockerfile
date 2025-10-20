@@ -17,4 +17,5 @@ COPY static/ ./static/
 EXPOSE 5000
 
 # Flask starten
+# CMD ["tail", "-f"]
 CMD ["python", "app.py"]
