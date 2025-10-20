@@ -8,7 +8,7 @@ app = Flask(__name__)
 # Lies sensible Daten aus Umgebungsvariablen (im Docker-Container gesetzt)
 CLIENT_ID = os.getenv("INTRA42_CLIENT_ID")
 CLIENT_SECRET = os.getenv("INTRA42_CLIENT_SECRET")
-REDIRECT_URI = "http://91.98.145.248/callback"
+REDIRECT_URI = "http://91.98.145.248:5000/callback"
 TOKEN_URL = "https://api.intra.42.fr/oauth/token"
 API_ME_URL = "https://api.intra.42.fr/v2/me"
 
