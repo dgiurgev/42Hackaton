@@ -2,8 +2,14 @@ from flask import Flask, render_template, request, jsonify, send_file
 import requests
 import os
 import json
-import subprocess
 from datetime import datetime
+from io import BytesIO
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import cm
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.lib.enums import TA_LEFT, TA_RIGHT
 
 app = Flask(__name__)
 
@@ -62,28 +68,39 @@ def format_date(date_string):
         return date_string
 
 
-def escape_latex(text):
-    """Escaped Sonderzeichen für LaTeX"""
-    replacements = {
-        '&': r'\&',
-        '%': r'\%',
-        '$': r'\$',
-        '#': r'\#',
-        '_': r'\_',
-        '{': r'\{',
-        '}': r'\}',
-        '~': r'\textasciitilde{}',
-        '^': r'\^{}',
-        '\\': r'\textbackslash{}',
-    }
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-    return text
-
-
-def generate_latex_pdf(user_data, output_path="output"):
-    """Generiert ein PDF aus den Benutzerdaten"""
+def generate_pdf(user_data):
+    """Generiert ein PDF aus den Benutzerdaten mit ReportLab"""
     
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4,
+                          leftMargin=2.5*cm, rightMargin=2.5*cm,
+                          topMargin=2*cm, bottomMargin=2*cm)
+    
+    # Container für PDF-Elemente
+    elements = []
+    
+    # Styles
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=16,
+        textColor=colors.HexColor('#404040'),
+        spaceAfter=6,
+        alignment=TA_RIGHT
+    )
+    
+    subtitle_style = ParagraphStyle(
+        'CustomSubtitle',
+        parent=styles['Normal'],
+        fontSize=10,
+        textColor=colors.HexColor('#404040'),
+        spaceAfter=3,
+        alignment=TA_RIGHT
+    )
+    
+    # Benutzerdaten extrahieren
     first_name = user_data.get("first_name", "")
     last_name = user_data.get("last_name", "")
     
@@ -101,6 +118,49 @@ def generate_latex_pdf(user_data, output_path="output"):
                 core_end = "In Progress"
             break
     
+    # Header mit Logo und Benutzerinfo
+    header_data = []
+    
+    # Logo hinzufügen (falls vorhanden)
+    logo_path = "42HNlogo.png"
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=6*cm, height=2*cm)
+        user_info = [
+            Paragraph(f"<b>{first_name} {last_name}</b>", title_style),
+            Paragraph(f"<b>Core Started:</b> {core_start}", subtitle_style),
+            Paragraph(f"<b>Core Completed:</b> {core_end}", subtitle_style),
+        ]
+        header_data = [[logo, user_info]]
+    else:
+        # Fallback ohne Logo
+        user_info = [
+            Paragraph(f"<b>{first_name} {last_name}</b>", title_style),
+            Paragraph(f"<b>Core Started:</b> {core_start}", subtitle_style),
+            Paragraph(f"<b>Core Completed:</b> {core_end}", subtitle_style),
+        ]
+        header_data = [["", user_info]]
+    
+    header_table = Table(header_data, colWidths=[8*cm, 8*cm])
+    header_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    
+    elements.append(header_table)
+    elements.append(Spacer(1, 1*cm))
+    
+    # Überschrift für Projekte
+    section_title = ParagraphStyle(
+        'SectionTitle',
+        parent=styles['Heading1'],
+        fontSize=14,
+        textColor=colors.HexColor('#404040'),
+        spaceAfter=12,
+    )
+    elements.append(Paragraph("Project Portfolio", section_title))
+    elements.append(Spacer(1, 0.5*cm))
+    
     # Projekte filtern: nur finished mit cursus_id 21
     finished_projects = []
     for p in user_data.get("projects_users", []):
@@ -113,92 +173,55 @@ def generate_latex_pdf(user_data, output_path="output"):
                     "final_grade": p.get("final_mark", "N/A"),
                 })
     
-    # LaTeX-Template erstellen
-    latex_content = r"""\documentclass[a4paper,11pt]{article}
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
-\usepackage{graphicx}
-\usepackage{geometry}
-\usepackage{tabularx}
-\usepackage{booktabs}
-\usepackage{xcolor}
-\usepackage{fancyhdr}
-\usepackage{array}
-
-\geometry{left=2.5cm, right=2.5cm, top=3cm, bottom=2.5cm}
-
-\pagestyle{fancy}
-\fancyhf{}
-\renewcommand{\headrulewidth}{0pt}
-\fancyfoot[C]{\thepage}
-
-\definecolor{darkgray}{RGB}{64,64,64}
-\definecolor{lightgray}{RGB}{240,240,240}
-
-\begin{document}
-
-% Header
-\noindent
-\begin{minipage}[t]{0.5\textwidth}
-    \includegraphics[width=0.6\textwidth]{42HNlogo.png}
-\end{minipage}%
-\begin{minipage}[t]{0.5\textwidth}
-    \raggedleft
-    \textbf{\Large """ + escape_latex(first_name) + r""" """ + escape_latex(last_name) + r"""}\\[0.5em]
-    \textcolor{darkgray}{
-        \textbf{Core Started:} """ + escape_latex(core_start) + r"""\\
-        \textbf{Core Completed:} """ + escape_latex(core_end) + r"""
-    }
-\end{minipage}
-
-\vspace{2em}
-
-\section*{Project Portfolio}
-
-\begin{tabularx}{\textwidth}{>{\bfseries}p{3.5cm}X>{\centering\arraybackslash}p{1.8cm}}
-\toprule
-\textbf{Project} & \textbf{Description} & \textbf{Grade} \\
-\midrule
-"""
-
-    # Projekte hinzufügen
-    for i, project in enumerate(finished_projects):
-        if i > 0:
-            latex_content += r"\midrule" + "\n"
+    # Tabelle für Projekte erstellen
+    project_data = [["Project", "Description", "Grade"]]
+    
+    desc_style = ParagraphStyle(
+        'DescStyle',
+        parent=styles['Normal'],
+        fontSize=9,
+        leading=11,
+    )
+    
+    for project in finished_projects:
+        project_data.append([
+            Paragraph(f"<b>{project['name']}</b>", styles['Normal']),
+            Paragraph(project['description'], desc_style),
+            str(project['final_grade'])
+        ])
+    
+    project_table = Table(project_data, colWidths=[3.5*cm, 10*cm, 2*cm])
+    project_table.setStyle(TableStyle([
+        # Header
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#404040')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
         
-        latex_content += escape_latex(project["name"]) + " & "
-        latex_content += escape_latex(project["description"]) + " & "
-        latex_content += str(project["final_grade"]) + r" \\" + "\n"
+        # Content
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ALIGN', (2, 1), (2, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ('LEFTPADDING', (0, 0), (-1, -1), 8),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 1), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+        
+        # Alternating row colors
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F0F0F0')]),
+    ]))
     
-    latex_content += r"""\bottomrule
-\end{tabularx}
-
-\end{document}"""
+    elements.append(project_table)
     
-    # LaTeX-Datei schreiben
-    tex_file = f"{output_path}.tex"
-    with open(tex_file, 'w', encoding='utf-8') as f:
-        f.write(latex_content)
-    
-    # PDF kompilieren
-    try:
-        subprocess.run(
-            ['pdflatex', '-interaction=nonstopmode', tex_file],
-            check=True,
-            capture_output=True,
-            cwd=os.path.dirname(os.path.abspath(tex_file)) or '.'
-        )
-        # Zweimal kompilieren für korrekte Referenzen
-        subprocess.run(
-            ['pdflatex', '-interaction=nonstopmode', tex_file],
-            check=True,
-            capture_output=True,
-            cwd=os.path.dirname(os.path.abspath(tex_file)) or '.'
-        )
-        return f"{output_path}.pdf"
-    except subprocess.CalledProcessError as e:
-        print(f"Fehler beim Kompilieren: {e}")
-        return None
+    # PDF generieren
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
 
 
 @app.route("/")
@@ -251,16 +274,23 @@ def callback():
     user = user_resp.json()
     print("Benutzerinformationen erfolgreich abgerufen.")
 
-    # PDF generieren
-    pdf_path = generate_latex_pdf(user, output_path="/tmp/portfolio")
-    
-    if pdf_path and os.path.exists(pdf_path):
-        return send_file(pdf_path, as_attachment=True, download_name="42_portfolio.pdf")
-    else:
-        return "Fehler beim Generieren des PDFs.", 500
+    try:
+        # PDF generieren
+        pdf_buffer = generate_pdf(user)
+        
+        return send_file(
+            pdf_buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f"42_portfolio_{user.get('login', 'user')}.pdf"
+        )
+    except Exception as e:
+        print(f"Fehler beim Generieren des PDFs: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"Fehler beim Generieren des PDFs: {str(e)}", 500
 
 
 if __name__ == "__main__":
     print("Flask-App gestartet auf http://0.0.0.0:5000")
     app.run(host="0.0.0.0", port=5000, debug=True)
-    
