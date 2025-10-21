@@ -66,14 +66,46 @@ def callback():
 
     user = user_resp.json()
     print("Benutzerinformationen erfolgreich abgerufen:")
-    print(json.dumps(user, indent=4))
 
 
-    # 4️⃣ Ausgabe zur Kontrolle im Browser
-    return jsonify({
-        "access_token": access_token,
-        "user": user
-    })
+    # ==========================
+    # Daten extrahieren
+    # ==========================
+    first_name = user.get("first_name", "")
+    last_name = user.get("last_name", "")
+
+    campus_data = user.get("campus", [])
+    if campus_data:
+        campus_name = campus_data[0].get("name", "")
+        campus_address = campus_data[0].get("address", "")
+    else:
+        campus_name = "Unbekannt"
+        campus_address = "-"
+
+    # Projekte filtern: nur finished
+    finished_projects = []
+    for p in user.get("projects_users", []):
+        if p.get("status") == "finished":
+            finished_projects.append({
+                "name": p.get("project", {}).get("name", "Unbekannt"),
+                "final_grade": p.get("final_mark", "n/a"),
+            })
+
+    # HTML-Seite rendern
+    return render_template(
+        "profile.html",
+        first_name=first_name,
+        last_name=last_name,
+        campus_name=campus_name,
+        campus_address=campus_address,
+        projects=finished_projects
+    )
+
+    # # 4️⃣ Ausgabe zur Kontrolle im Browser
+    # return jsonify({
+    #     "access_token": access_token,
+    #     "user": user
+    # })
 
 
 if __name__ == "__main__":
